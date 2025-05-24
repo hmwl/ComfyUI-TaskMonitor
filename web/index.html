@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Monitor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .queue-section {
+            margin-top: 20px;
+        }
+        .task-item {
+            padding: 10px;
+            margin: 5px 0;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+        }
+        .progress-container {
+            width: 100%;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .progress-bar {
+            height: 20px;
+            background-color: #007bff;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        .progress-text {
+            text-align: center;
+            margin-top: 5px;
+            font-size: 14px;
+            color: #6c757d;
+        }
+        .error-message {
+            color: #dc3545;
+            padding: 10px;
+            margin: 10px 0;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+        }
+        .completed-task {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        .running-task {
+            background-color: #cce5ff;
+            border-color: #b8daff;
+        }
+        .queued-task {
+            background-color: #fff3cd;
+            border-color: #ffeeba;
+        }
+        .total-progress {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+        }
+        .total-progress h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+        .execution-time-container {
+            font-size: 14px;
+            color: #666;
+            padding: 5px 10px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Task Monitor</h1>
+        
+        <div class="status-section">
+            <h2>Current Status</h2>
+            <p>Task ID: <span id="current-task-id">-</span></p>
+            <p>Status: <span id="current-status">idle</span></p>
+            
+            <div class="total-progress">
+                <h3>Workflow Progress</h3>
+                <div class="progress-container">
+                    <div id="total-progress-bar" class="progress-bar" style="width: 0%"></div>
+                </div>
+                <div id="total-progress-text" class="progress-text">0/0 nodes executed</div>
+            </div>
+            <div class="execution-time-container">
+                <span>Execution Time: </span>
+                <span id="execution-time">00:00:00</span>
+            </div>
+
+            <div id="current-progress" style="display: none;">
+                <h3>Current Node Progress</h3>
+                <p>Node Type: <span id="current-node-type">-</span></p>
+                <div class="progress-container">
+                    <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+                </div>
+                <div id="progress-text" class="progress-text">0/0 steps</div>
+                <p id="progress-message"></p>
+            </div>
+        </div>
+
+        <div id="error-section" class="error-message" style="display: none;"></div>
+
+        <div class="queue-section">
+            <h2>Queue</h2>
+            <div id="running-tasks">
+                <h3>Running Tasks</h3>
+                <div id="running-tasks-list"></div>
+            </div>
+            <div id="pending-tasks">
+                <h3>Pending Tasks</h3>
+                <div id="pending-tasks-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTaskId = null;
+        let lastStatus = null;
+
+        function updateProgressBar(progress, total, elementId) {
+            const percentage = total > 0 ? (progress / total) * 100 : 0;
+            const progressBar = document.getElementById(elementId);
+            progressBar.style.width = `${percentage}%`;
+        }
+
+        function updateTotalProgress(executed, total) {
+            updateProgressBar(executed, total, 'total-progress-bar');
+            document.getElementById('total-progress-text').textContent = `${executed}/${total} nodes executed`;
+        }
+
+        function updateNodeProgress(progress, total) {
+            updateProgressBar(progress, total, 'progress-bar');
+            document.getElementById('progress-text').textContent = `${progress}/${total} steps`;
+        }
+
+        function updateTaskList(tasks, containerId, status) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            
+            tasks.forEach(task => {
+                const taskElement = document.createElement('div');
+                taskElement.className = `task-item ${status}-task`;
+                taskElement.innerHTML = `
+                    <p>Task ID: ${task.prompt_id}</p>
+                    <p>Nodes: ${task.nodes_in_prompt}</p>
+                    ${task.client_id ? `<p>Client ID: ${task.client_id}</p>` : ''}
+                `;
+                container.appendChild(taskElement);
+            });
+        }
+
+        function updateStatus(data) {
+            // Update current task ID and status
+            document.getElementById('current-task-id').textContent = data.task_id || '-';
+            document.getElementById('current-status').textContent = data.status;
+
+            // Update total progress
+            const workflowProgress = data.workflow_progress || {};
+            updateTotalProgress(workflowProgress.executed_nodes || 0, workflowProgress.total_nodes || 0);
+
+            // Update current node progress if available
+            const progressSection = document.getElementById('current-progress');
+            if (data.current_task_progress) {
+                progressSection.style.display = 'block';
+                document.getElementById('current-node-type').textContent = data.current_task_progress.node_type || '-';
+                updateNodeProgress(
+                    data.current_task_progress.step || 0,
+                    data.current_task_progress.total_steps || 0
+                );
+                document.getElementById('progress-message').textContent = data.current_task_progress.text_message || '';
+            } else {
+                progressSection.style.display = 'none';
+            }
+            // Update execution time
+            if (data.execution_time !== undefined) {
+                const executionTime = data.execution_time || 0;
+                const date = new Date(executionTime * 1000);
+                const hours = String(date.getUTCHours()).padStart(2, '0');
+                const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+                const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+                const fullMilliseconds = Math.round((executionTime % 1) * 1000);
+                const milliseconds = String(Math.round(fullMilliseconds / 10)).padStart(2, '0');
+                const formattedTime = `${hours}h:${minutes}m:${seconds}s:${milliseconds}ms`;
+                document.getElementById('execution-time').textContent = formattedTime;
+            }
+
+            // Update error section
+            const errorSection = document.getElementById('error-section');
+            if (data.error_info && data.error_info.length > 0) {
+                errorSection.style.display = 'block';
+                // Find the execution error in the error info array
+                const errorEntry = data.error_info.find(entry => entry[0] === 'execution_error');
+                if (errorEntry && errorEntry[1]) {
+                    const errorData = errorEntry[1];
+                    errorSection.innerHTML = `
+                        <h3>Error in ${errorData.node_type || 'node'}: ${errorData.exception_type || 'Error'}</h3>
+                        <p>${errorData.exception_message || 'An unknown error occurred'}</p>
+                        <details>
+                            <summary>Details</summary>
+                            <pre>${JSON.stringify(errorData, null, 2)}</pre>
+                        </details>
+                    `;
+                } else {
+                    // Fallback for other error formats
+                    errorSection.innerHTML = `
+                        <h3>Error</h3>
+                        <pre>${JSON.stringify(data.error_info, null, 2)}</pre>
+                    `;
+                }
+            } else {
+                errorSection.style.display = 'none';
+            }
+
+            // Update queue information
+            updateTaskList(data.queue.running || [], 'running-tasks-list', 'running');
+            updateTaskList(data.queue.pending || [], 'pending-tasks-list', 'queued');
+
+            // Update document title with status
+            document.title = `Task Monitor - ${data.status.charAt(0).toUpperCase() + data.status.slice(1)}`;
+        }
+
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/task_monitor/status');
+                const data = await response.json();
+                
+                // Only update if the status has changed
+                if (JSON.stringify(data) !== lastStatus) {
+                    updateStatus(data);
+                    lastStatus = JSON.stringify(data);
+                }
+            } catch (error) {
+                console.error('Error fetching status:', error);
+            }
+        }
+
+        // Initial fetch
+        fetchStatus();
+
+        // Poll for updates every second
+        setInterval(fetchStatus, 1000);
+    </script>
+</body>
+</html> 

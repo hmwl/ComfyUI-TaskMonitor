@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "comfyui_taskmonitor"
+description = "A powerful task monitoring extension for ComfyUI that provides real-time progress tracking, workflow statistics, and execution monitoring."
+version = "1.0.0"
+license = {file = "LICENSE"}
+
+[project.urls]
+Repository = "https://github.com/hmwl/ComfyUI-TaskMonitor"
+# Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = "hmwl"
+DisplayName = "Task Monitor"
+Icon = ""
+
+[tool.setuptools]
+packages = ["ComfyUI-TaskMonitor"] 

@@ -43,7 +43,7 @@ git clone https://github.com/hmwl/ComfyUI-TaskMonitor.git
 
 1. Add the "Task Monitor API Node" to your workflow (no required)
 2. Connect it to your workflow (the node doesn't require any inputs)
-3. Access the monitoring interface at: `http://localhost:8188/task_monitor`
+3. Access the monitoring interface at: `http://localhost:8188/task_monitor/index.html`
 
 ### Web Interface
 
@@ -168,7 +168,7 @@ git clone https://github.com/hmwl/ComfyUI-TaskMonitor.git
 
 1. 在工作流中添加 "Task Monitor API Node" 节点（非必要）
 2. 将节点连接到工作流（该节点不需要任何输入）
-3. 访问监控界面：`http://localhost:8188/task_monitor`
+3. 访问监控界面：`http://localhost:8188/task_monitor/index.html`
 
 ### Web 界面
 

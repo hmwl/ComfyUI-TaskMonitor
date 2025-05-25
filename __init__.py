@@ -1,14 +1,8 @@
-import asyncio
 import json
 import os
 import shutil
 import copy
 import time
-from server import PromptServer
-from comfy import samplers
-import comfy.utils
-from aiohttp import web
-
 
 # Constants
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -106,6 +100,7 @@ class TaskMonitorNode:
         queue_remaining = exec_info.get("queue_remaining", 0)
         
         # get current task
+        from server import PromptServer
         server = PromptServer.instance
         running_tasks, pending_tasks = server.prompt_queue.get_current_queue()
         if running_tasks:
@@ -130,6 +125,7 @@ class TaskMonitorNode:
             return
             
         # get current task
+        from server import PromptServer
         server = PromptServer.instance
         running_tasks, _ = server.prompt_queue.get_current_queue()
         for task in running_tasks:
@@ -232,22 +228,19 @@ class TaskMonitorNode:
     def do_nothing(self, prompt=None, extra_pnginfo=None):
         return ()
 
-# Create the global instance
 TaskMonitorNode.instance = TaskMonitorNode()
 
 # Server utilities
 def get_param(request, param, default=None):
-    """Get a parameter from a request query string."""
     return request.rel_url.query[param] if param in request.rel_url.query else default
 
 def is_param_truthy(request, param):
-    """Check if a parameter is explicitly true."""
     val = get_param(request, param)
     return val is not None and val.lower() not in ("0", "false", "no")
 
-# Route handlers
 async def get_task_status(request):
-    """Handle GET requests to /task_monitor/status."""
+    from server import PromptServer
+    from aiohttp import web
     monitor_node = TaskMonitorNode.instance
     server = PromptServer.instance
     queue = server.prompt_queue
@@ -353,9 +346,9 @@ async def get_task_status(request):
 _original_progress_hook = None
 _original_send_sync_method = None
 
-# progress hook function - only used to get progress information, does not affect the main interface
 def task_monitor_progress_hook(value, total, preview_image):
     """Hook for progress updates."""
+    from server import PromptServer
     monitor = TaskMonitorNode.instance
     server = PromptServer.instance
     
@@ -380,106 +373,59 @@ def task_monitor_progress_hook(value, total, preview_image):
     
     return preview_image
 
-# server event interceptor function
 def task_monitor_send_sync(event, data, sid=None):
-    # first handle the event
     monitor = TaskMonitorNode.instance
     monitor.handle_event(event, data)
-    
-    # then call the original method
     if _original_send_sync_method:
         return _original_send_sync_method(event, data, sid)
     return None
 
-def setup_hooks():
+def register_routes_with_retry(max_retries=30, interval=0.5):
+    import asyncio
+    import threading
+    from server import PromptServer
+    from aiohttp import web
+    async def try_register():
+        for _ in range(max_retries):
+            if hasattr(PromptServer.instance, "app") and PromptServer.instance.app is not None:
+                PromptServer.instance.app.router.add_static('/task_monitor', DIR_WEB)
+                PromptServer.instance.app.add_routes([
+                    web.get('/task_monitor/status', get_task_status)
+                ])
+                return
+            await asyncio.sleep(interval)
+    threading.Thread(target=lambda: asyncio.run(try_register()), daemon=True).start()
+
+def setup():
     global _original_progress_hook, _original_send_sync_method
-    
+    import comfy.utils
+    from server import PromptServer
     # save original hook and set our hook
     if comfy.utils.PROGRESS_BAR_HOOK and comfy.utils.PROGRESS_BAR_HOOK != task_monitor_progress_hook:
         _original_progress_hook = comfy.utils.PROGRESS_BAR_HOOK
-    
     # set progress hook
     comfy.utils.set_progress_bar_global_hook(task_monitor_progress_hook)
-    
     # set server event hook
     server = PromptServer.instance
     if hasattr(server, 'send_sync') and not hasattr(server, '_original_send_sync_tm_bound'):
         _original_send_sync_method = server.send_sync
         server._original_send_sync_tm_bound = server.send_sync
-        
-        # use function replacement
         def new_send_sync(event, data, sid=None):
-            # first handle the event
             monitor = TaskMonitorNode.instance
             try:
                 monitor.handle_event(event, data)
             except Exception as e:
                 print(f"[TaskMonitor] Error handling event {event}: {e}")
-            
-            # then call the original method
             return _original_send_sync_method(event, data, sid)
-        
         server.send_sync = new_send_sync
+    register_routes_with_retry()
 
-def register_routes():
-    if hasattr(PromptServer.instance, "app") and PromptServer.instance.app is not None:
-        # Add static file serving
-        PromptServer.instance.app.router.add_static('/task_monitor', DIR_WEB)
-        
-        # Add API routes
-        PromptServer.instance.app.add_routes([
-            web.get('/task_monitor/status', get_task_status)
-        ])
-    else:
-        async def deferred_register():
-            await asyncio.sleep(1)
-            if hasattr(PromptServer.instance, "app") and PromptServer.instance.app is not None:
-                # Add static file serving
-                PromptServer.instance.app.router.add_static('/task_monitor', DIR_WEB)
-                
-                # Add API routes
-                PromptServer.instance.app.add_routes([
-                    web.get('/task_monitor/status', get_task_status)
-                ])
-        
-        if hasattr(PromptServer.instance, "loop") and PromptServer.instance.loop is not None:
-            PromptServer.instance.loop.create_task(deferred_register())
-        else:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(deferred_register())
-            except RuntimeError:
-                pass
-
-# delay setup hooks and routes
-async def deferred_setup():
-    await asyncio.sleep(1.0)
-    if PromptServer.instance:
-        # set hooks
-        setup_hooks()
-        print("[TaskMonitor] Task progress monitoring started")
-
-# delay register routes
-if PromptServer.instance:
-    register_routes()
-else:
-    register_routes()
-
-try:
-    loop = asyncio.get_running_loop()
-    loop.create_task(deferred_setup())
-except RuntimeError:
-    if PromptServer.instance and hasattr(PromptServer.instance, "loop"):
-        PromptServer.instance.loop.create_task(deferred_setup())
-
-# Node registration
 NODE_CLASS_MAPPINGS = {
     TaskMonitorNode.NAME: TaskMonitorNode
 }
-
 NODE_DISPLAY_NAME_MAPPINGS = {
     TaskMonitorNode.NAME: "Task Monitor API Node"
 }
-
-# Export for ComfyUI
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS', 'WEB_DIRECTORY']
+
+setup()
